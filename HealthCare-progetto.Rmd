@@ -1,0 +1,161 @@
+---
+title: "HealthCare-progetto"
+author: "Elia Schiavon"
+date: "9 maggio 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Big data in Health Care: Studio di un marker misurato longitudinalmente nel tempo
+
+## Analisi esplorativa (DA COMPLETARE)
+Descrizione del dataset `valvola-aortica.txt`
+
+```{r}
+library(ggplot2)
+```
+
+
+```{r}
+#datavalv<-read.table(file.choose(), na.strings=".",header=T,row.names=NULL)
+datavalv<-read.table("valvola.aortica.txt", na.strings=".",header=T,row.names=NULL)
+names(datavalv)
+```
+
+```{r}
+head(datavalv)
+```
+
+
+## Modello di rischio al basale (Cox)
+Stima di un modello di rischio con la regressione di Cox, che includa tutte le covariate al basale (viene escluso il marker `log.lvmi`).
+```{r}
+library(survival)
+library(rms)
+```
+
+```{r}
+datavalv.fac <- within(datavalv, {
+  sex <- factor(sex, labels = c("male", "female"))
+  con.cabg <- factor(con.cabg, labels = c("no", "si"))
+  lv <- factor(lv, labels = c("buona", "moderata", "scarsa"))
+  sten.reg.mix <- factor(sten.reg.mix, labels = c("stenosi", "rigurgito", "misto"))
+})
+```
+
+```{r}
+#creazione di un nuovo dataset che non abbia righe duplicate per paziente
+datavalvWide<-datavalv[!duplicated(datavalv$num),]
+datavalvWide.fac<-datavalv.fac[!duplicated(datavalv.fac$num),]
+head(datavalvWide.fac)
+```
+
+
+```{r}
+coxmod <- coxph(Surv(fuyrs, status) ~ sex + age + con.cabg + creat + lv + sten.reg.mix, data = datavalvWide, x=T)
+coxmod.fac <- coxph(Surv(fuyrs, status) ~ sex + age + con.cabg + creat + lv + sten.reg.mix, data = datavalvWide.fac, x=T)
+summary(coxmod)
+summary(coxmod.fac)
+```
+
+```{r}
+require(survminer)
+ggforest(coxmod)
+ggforest(coxmod.fac)
+```
+
+
+```{r}
+#plot delle curva di baseline (eventualmente scegliere un profilo di covariate interessante con cui confrontarla)
+bas<-basehaz(coxmod,centered=FALSE)
+bas.surv<- exp( -bas[,1] )
+plot(bas$time, bas.surv, type='s',col=1,lty=2, xlab='time', ylab='survival probability')
+```
+
+```{r}
+#verifica dell'ipotesi di ph con RESIDUI DI SOENFELD (sistemare dimensioni della figura finale)
+par(mfrow=c(3,2),mar=c(4,4,2,2))
+checkPH_sex<-cox.zph(coxmod)[1]
+plot(checkPH_sex,main="Check PH assumption of sex")
+points(checkPH_sex$x,checkPH_sex$y,pch=16,col="lightgray")
+abline(h=0,lty=2,col=2)
+
+checkPH_age<-cox.zph(coxmod)[2]
+plot(checkPH_age,main="Check PH assumption of age")
+points(checkPH_age$x,checkPH_age$y,pch=16,col="lightgray")
+abline(h=0,lty=2,col=2)
+
+checkPH_con<-cox.zph(coxmod)[3]
+plot(checkPH_con,main="Check PH assumption of con.cabg")
+points(checkPH_con$x,checkPH_con$y,pch=16,col="lightgray")
+abline(h=0,lty=2,col=2)
+
+checkPH_creat<-cox.zph(coxmod)[4]
+plot(checkPH_creat,main="Check PH assumption of creat")
+points(checkPH_creat$x,checkPH_creat$y,pch=16,col="lightgray")
+abline(h=0,lty=2,col=2)
+
+checkPH_lv<-cox.zph(coxmod)[5]
+plot(checkPH_lv,main="Check PH assumption of lv")
+points(checkPH_lv$x,checkPH_lv$y,pch=16,col="lightgray")
+abline(h=0,lty=2,col=2)
+
+checkPH_sten<-cox.zph(coxmod)[6]
+plot(checkPH_sten,main="Check PH assumption of sten.reg.mix")
+points(checkPH_sten$x,checkPH_sten$y,pch=16,col="lightgray")
+abline(h=0,lty=2,col=2)
+```
+
+```{r}
+#verifica dell'ipotesi di ph con metodo graficon (OK SOLO PER VARIABILI CATEGORICHE )
+
+par(mfrow=c(3,2),mar=c(4,4,2,2))
+
+km_sex<-survfit(Surv(fuyrs, status) ~ sex,data=datavalvWide)
+plot(km_sex, col=c("black", "red"), fun="cloglog",ylab="log(-log(Survival))",xlab="log(time)",main="Check PH assumption of sex")
+
+km_creat <- survfit(Surv(fuyrs, status) ~ creat, data = datavalvWide)
+plot(km_creat, col=c("black", "red"), fun="cloglog",ylab="log(-log(Survival))",xlab="log(time)",main="Check PH assumption of creat")
+
+km_lv<-survfit(Surv(fuyrs, status) ~ factor(lv),data=datavalvWide)
+plot(km_lv, col=c("black", "red"), fun="cloglog",ylab="log(-log(Survival))",xlab="log(time)",main="Check PH assumption of lv")
+### groped KM ma funziona solo a tempo fissat, non va bene per distinguere le curve di sopravvivenza per diversi valori del gruppo di covariate
+km_age<-groupkm(datavalvWide$age, Surv(datavalvWide$fuyrs, datavalvWide$status), g=10, u=5, pl=TRUE)
+plot(km_age, col=c("black", "red"), fun="cloglog",ylab="log(-log(Survival))",xlab="log(time)",main="Check PH assumption of age")
+
+km_con<-survfit(Surv(fuyrs, status) ~ con.cabg,data=datavalvWide)
+plot(km_con, col=c("black", "red"), fun="cloglog",ylab="log(-log(Survival))",xlab="log(time)",main="Check PH assumption of con.cabg")
+
+km_creat<-survfit(Surv(fuyrs, status) ~ creat,data=datavalvWide)
+
+km_sten<-survfit(Surv(fuyrs, status) ~ sten.reg.mix,data=datavalvWide)
+plot(km_sten, col=c("black", "red"), fun="cloglog",ylab="log(-log(Survival))",xlab="log(time)",main="Check PH assumption of sten.reg.mix")
+```
+
+
+
+```{r}
+#verifica della linearità delle variabili continue
+```
+
+
+```{r}
+#valutazione
+
+fitfunc<-survfit(coxmod,newdata=datavalvWide)
+datavalvWide$riskdeath6yr<-1-as.numeric(summary(fitfunc, times = 6)$surv) 
+```
+
+
+
+
+
+
+
+
+
+
+
