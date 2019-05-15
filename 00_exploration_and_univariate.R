@@ -12,7 +12,11 @@ PATH <- "Health Care/Project/"
 datavalv <- read.table(paste0(PATH, "valvola.aortica.txt"), na.strings = ".", 
                        header = T, row.names = NULL)
 names(datavalv)
-# Inverti l'ordine di EF (fraz. eiezione ventricolare) 
+
+# Rimuovi record sbagliati con creatinina estremamente alta
+datavalv <- datavalv[-which(datavalv$creat > 400), ]
+
+# Inverti l'ordine di EF (fraz. eiezione) ventricolare
 datavalv$lv <- ifelse(datavalv$lv == 1, 3, ifelse(datavalv$lv == 3, 1, 2))
 # Crea un dataset con le variabili trasformate in factor
 datavalv.fac <- within(datavalv, {
