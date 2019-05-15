@@ -32,7 +32,7 @@ d <- datavalvWide.fac
 
 pander(head(d), big.mark = ",")
 
-VAR_NUMERIC <- c("age", "log.lvmi", "creat")
+VAR_NUMERIC <- c("age", "log.lvmi", "creat", "fuyrs")
 
 pander(summary(d[, VAR_NUMERIC]), big.mark = ",") #-- statistiche descrittive
 
@@ -92,13 +92,19 @@ ggplot(d, aes(x = fuyrs))  +
   geom_density() + 
   xlab("Follow up (years)") +
   ggtitle("Factor level distribution", subtitle = "EF ventricolare sx pre-operatoria") +
-  facet_wrap(~ lv, ncol = 3)
+  facet_wrap(~ lv, ncol = 1)
 ggplot(d, aes(x = fuyrs))  +
   #geom_histogram(alpha = 0.8, binwidth = 1/4) + 
   geom_density() + 
   xlab("Follow up (years)") +
   ggtitle("Factor level distribution", subtitle = "Emodinamica valvola aortica") + 
   facet_wrap(~ sten.reg.mix, ncol = 3)
+ggplot(d, aes(x = fuyrs))  +
+  #geom_histogram(alpha = 0.8, binwidth = 1/4) + 
+  geom_density() + 
+  xlab("Follow up (years)") +
+  ggtitle("Factor level distribution", subtitle = "Bypass coronarico concomitante") + 
+  facet_wrap(~ con.cabg, ncol = 3)
 
 ############################
 ## UNIVARIATE ASSOCIATION ##
