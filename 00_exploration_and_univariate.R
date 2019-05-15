@@ -50,13 +50,13 @@ par(mfrow = c(1,1))
 x_min <- 0
 x_max <- 185
 p1 <- ggplot(d, aes(x = sex)) + 
-  geom_bar(fill = "darkblue", width = 0.8) + 
+  geom_bar(fill = "#0000FF", width = 0.8) + 
   coord_flip() + 
   xlab("Genere") + ylab("Number of Observations") +
   scale_y_continuous(limits = c(x_min, x_max), breaks = seq(x_min, x_max, by = 25)) +
   #geom_text(aes(y = scales::percent(..count..) * 100)) +
   theme(axis.ticks.x = element_blank(), axis.title.x = element_blank()) +
-  ggtitle("Factor variables levels' occurence")
+  ggtitle(main = "Occorrenza dei livelli delle variabili categoriche")
 
 p2 <- ggplot(d, aes(x = lv)) + 
   geom_bar(fill = "blue", width = 0.8) + 
@@ -66,11 +66,16 @@ p2 <- ggplot(d, aes(x = lv)) +
   theme(axis.ticks.x = element_blank(), axis.title.x = element_blank())
 
 p3 <- ggplot(d, aes(x = sten.reg.mix)) + 
-  geom_bar(fill = "lightblue", width = 0.8) + 
+  geom_bar(fill = "#009fff", width = 0.8) + 
   coord_flip() + 
-  xlab("Emodinamica della valvola aortica") + ylab("Number of Observations") +
+  xlab("Emodinamica della valvola aortica") + #ylab("Number of Observations") +
   scale_y_continuous(limits = c(x_min, x_max), breaks = seq(x_min, x_max, by = 25)) 
-grid.arrange(p1, p2, p3, ncol = 1, heights = c(0.8, 1, 1))
+p4 <- ggplot(d, aes(x = con.cabg)) + 
+  geom_bar(fill = "#00d2ff", width = 0.8) + 
+  coord_flip() + 
+  xlab("Presenza di bypass coronarico") + ylab("Number of Observations") +
+  scale_y_continuous(limits = c(x_min, x_max), breaks = seq(x_min, x_max, by = 25)) 
+grid.arrange(p1, p2, p3, p4, ncol = 1, heights = c(0.8, 1, 1, 0.8))
 
 
 # Density for each level of factor variable
