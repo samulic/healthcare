@@ -44,11 +44,13 @@ pander(cor(d[,VAR_NUMERIC]),big.mark=",") #-- matrice di correlazione
 
 plot(d[,VAR_NUMERIC],pch=19,cex=.5) #-- scatter plot multivariato
 
-par(mfrow = c(1,3))
+par(mfrow = c(2,2))
 for(i in VAR_NUMERIC){
-  boxplot(d[,i], main = i, col = "lightblue", ylab = i)
+  boxplot(d[,i], main = i, col = "lightblue", ylab = i, add = TRUE)
+  points(mean(d[,i], pch = 23, col = "red"))
 }
 par(mfrow = c(1,1))
+
 
 # X-axis min and max counts
 x_min <- 0
@@ -94,9 +96,13 @@ grid.arrange(p1, p2, p3, p4, ncol = 1, heights = c(0.8, 1, 1, 0.8))
 ggplot(d, aes(x = fuyrs))  +
   #geom_histogram(alpha = 0.8, binwidth = 1/4) + 
   geom_density() + 
-  xlab("Follow up (years)") +
-  ggtitle("Factor level distribution", subtitle = "EF ventricolare sx pre-operatoria") +
-  facet_wrap(~ lv, ncol = 1)
+  xlab("Follow up (years)") + ylab("Densita' di mortalita'") +
+  ggtitle("Distribuzione del tempo di follow up", 
+          subtitle = "Frazione di eiezione ventricolare sinistra pre-operatoria") +
+  facet_wrap(~ lv, ncol = 1) +
+  theme_light() + 
+  theme(axis.text = element_text(size = 12), axis.title = element_text(size = 15), 
+        title = element_text(size = 18))
 ggplot(d, aes(x = fuyrs))  +
   #geom_histogram(alpha = 0.8, binwidth = 1/4) + 
   geom_density() + 
@@ -114,38 +120,51 @@ ggplot(d, aes(x = fuyrs))  +
 ## UNIVARIATE ASSOCIATION ##
 ############################
 # Identify factor variables
-is.cat <- sapply(d, is.factor)
-is.cat 
+#is.cat <- sapply(d, is.factor)
+#is.cat 
 # if we chose dataset without factor transformation
-if (sum(sapply(d, is.factor)) < 1) {
-  cat <- c("sex", "con.cabg", "lv", "sten.reg.mix") # ATTENZIONE ! Hard coded variables
-} else {
-  cat <- colnames(d[, is.cat]) 
-}
-cat
+#if (sum(sapply(d, is.factor)) < 1) {
+#  cat <- c("sex", "con.cabg", "lv", "sten.reg.mix") # ATTENZIONE ! Hard coded variables
+#} else {
+#  cat <- colnames(d[, is.cat]) 
+#}
+#cat
+variables <- names(d) 
+variables <- variables[!variables %in% c("num", "time", "fuyrs", "status", "log.lvmi")]
 # Create dataframe of univariate models' (coefficients est. and pvalues)
 varimp <- list() # create an empty list
 i = 1 # index to assign data to the list
-for (var in cat) {
+for (var in variables) {
   nlevels <- nlevels(d[, var]) # number of levels of the variable
   
-  formula <- as.formula(paste("Surv(time,status) ~", var))
+  formula <- as.formula(paste("Surv(fuyrs, status) ~", var))
   fit.uni <- coxph(formula, data = d)
   
   beta <- coef(fit.uni)
   se   <- sqrt(diag(fit.uni$var))
-  CI   <- round(exp(confint(fit.uni)), 4)
-
-  for (lev.idx in 1:(nlevels - 1)) {
-    hr <- exp(beta[lev.idx])
-    lowCI <- CI[lev.idx, 1]
-    highCI <- CI[lev.idx, 2]
-    pvalue <- 1 - pchisq((beta[lev.idx] / se[lev.idx]) ^ 2, nlevels - 1)
-    feature <- names(beta[lev.idx])
-    vec <- c(hr, lowCI, highCI, pvalue, feature)
+  CI   <- exp(confint(fit.uni))
+  if (nlevels > 0) {
+    for (lev.idx in 1:(nlevels - 1)) {
+      hr      <- exp(beta[lev.idx])
+      lowCI   <- CI[lev.idx, 1]
+      highCI  <- CI[lev.idx, 2]
+      pvalue  <- 1 - pchisq((beta[lev.idx] / se[lev.idx]) ^ 2, nlevels - 1)
+      feature <- names(beta[lev.idx])
+      vec     <- c(hr, lowCI, highCI, pvalue, feature)
+      varimp[[i]] <- vec
+      i = i + 1
+    }
+  } else {
+    hr      <- exp(beta)
+    lowCI   <- CI[1]
+    highCI  <- CI[2]
+    pvalue  <- summary(fit.uni)$coefficients[5]
+    feature <- names(coef(fit.uni))[1]
+    vec     <- c(hr, lowCI, highCI, pvalue, feature)
     varimp[[i]] <- vec
     i = i + 1
   }
+  #ifelse()
 }
 df <- do.call("rbind", varimp) #combine all vectors into a matrix
 df <- data.frame(df, stringsAsFactors = FALSE)
