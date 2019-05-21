@@ -44,10 +44,18 @@ pander(cor(d[,VAR_NUMERIC]),big.mark=",") #-- matrice di correlazione
 
 plot(d[,VAR_NUMERIC],pch=19,cex=.5) #-- scatter plot multivariato
 
+# Box-plots
+par(mfrow = c(1,4))
+for(i in VAR_NUMERIC){
+  # Color of outliers
+  outcol <- "black"
+  #if (i == "creat") outcol <- "red"
+  boxplot(d[,i], main = i, col = "lightblue", outcol=outcol, ylab = i)
+#  points(mean(d[,i], pch = 23, col = "red"))
+}
 par(mfrow = c(2,2))
 for(i in VAR_NUMERIC){
-  boxplot(d[,i], main = i, col = "lightblue", ylab = i, add = TRUE)
-  points(mean(d[,i], pch = 23, col = "red"))
+  hist(d[,i],main=i,col="lightblue",xlab=i,freq=F)
 }
 par(mfrow = c(1,1))
 
@@ -119,20 +127,11 @@ ggplot(d, aes(x = fuyrs))  +
 ############################
 ## UNIVARIATE ASSOCIATION ##
 ############################
-# Identify factor variables
-#is.cat <- sapply(d, is.factor)
-#is.cat 
-# if we chose dataset without factor transformation
-#if (sum(sapply(d, is.factor)) < 1) {
-#  cat <- c("sex", "con.cabg", "lv", "sten.reg.mix") # ATTENZIONE ! Hard coded variables
-#} else {
-#  cat <- colnames(d[, is.cat]) 
-#}
-#cat
 variables <- names(d) 
+# Escludi alcune variabili
 variables <- variables[!variables %in% c("num", "time", "fuyrs", "status", "log.lvmi")]
-# Create dataframe of univariate models' (coefficients est. and pvalues)
-varimp <- list() # create an empty list
+# Create an empty list of univariate models' (coefficients est. and pvalues)
+varimp <- list() # 
 i = 1 # index to assign data to the list
 for (var in variables) {
   nlevels <- nlevels(d[, var]) # number of levels of the variable
@@ -143,7 +142,7 @@ for (var in variables) {
   beta <- coef(fit.uni)
   se   <- sqrt(diag(fit.uni$var))
   CI   <- exp(confint(fit.uni))
-  if (nlevels > 0) {
+  if (nlevels > 1) { # zero or more than two levels
     for (lev.idx in 1:(nlevels - 1)) {
       hr      <- exp(beta[lev.idx])
       lowCI   <- CI[lev.idx, 1]
@@ -172,4 +171,97 @@ colnames(df) <- c("HR", "lower95%CI", "upper95%CI", "pvalue", "feature")
 # arrotonda
 varimp <- round(as.data.frame(sapply(df[, names(df) != "feature"], as.numeric)), 4)
 varimp$feature <- df$feature
-(varimp <- varimp[order(varimp$pvalue), ])
+(varimp <- varimp[order(varimp$feature), ])
+
+## PLOT Double-check dell'analisi univariata
+# Presenza o no di bypass
+df <- d %>% group_by(tempofu = round(fuyrs, 0), con.cabg) %>% 
+  summarise(mort = sum(status), 
+            nonmort = sum(abs(status - 1)),
+            tot = n())
+# Conta quanti pazienti in totale hanno subito bypass e quanti no
+df$tot_bypass <- ave(df$tot, df$con.cabg, FUN = sum)
+
+idx_bypass <- which(df$con.cabg == "si")
+df_bypass_si <- df[idx_bypass,]
+df_bypass_no <- df[-idx_bypass, ]
+# Tieni conto del di pazienti ad ogni tempo di follow up
+df_bypass_si$tot_cumsum <- cumsum(df_bypass_si$tot)
+df_bypass_no$tot_cumsum <- cumsum(df_bypass_no$tot)
+# unisci i due dataset
+dd <- rbind(df_bypass_no, df_bypass_si)
+
+dd <- dd %>% group_by(con.cabg) %>% mutate(diff = tot_bypass-lag(tot_cumsum))
+
+# coalesce unisce due colonne sostituendo i NA della colonna n.1 con la n.2
+dd <- dd %>% mutate(left_alive = coalesce(diff, tot_bypass)) %>% 
+  select(tempofu, con.cabg, mort, tot, left_alive)
+
+dd$mort_su_vivi <- dd$mort / dd$left_alive
+# Rimuovi le righe con zero decessi
+dd <- dd[dd$mort != 0,]
+
+g1 <- ggplot(data = dd, aes(x = tempofu, y = mort_su_vivi, col = con.cabg, size = mort)) + 
+  geom_point() + 
+  geom_smooth(se = F) +
+  xlab("Tempo di follow up (anni)") +
+  ylab("Frazione di decessi sul totale") +
+  ggtitle(label = "Andamenti delle proprozioni di decessi dopo l'operazione di impianto di valvole cardiache", 
+          subtitle = "Distinti per bypass coronarico concomitante") +
+  labs(col = "Bypass\ncoronarico", size = "Decessi") +
+  scale_color_manual(values = c("#228B22", "red")) +
+  guides(size = guide_legend(override.aes = list(linetype = 0)),
+         color = guide_legend(override.aes = list(linetype = 0))) +
+  theme(axis.title = element_text(size = 15),
+        axis.text = element_text(size = 12),
+        legend.title = element_text(size = 14),
+        legend.text = element_text(size = 14),
+        title = element_text(size = 18.5)) 
+
+# Emodinamica della valvola aortica
+df <- d %>% group_by(tempofu = round(fuyrs, 0), sten.reg.mix) %>% 
+  summarise(mort = sum(status), 
+            nonmort = sum(abs(status - 1)),
+            tot = n())
+
+df$tot_bypass <- ave(df$tot, df$sten.reg.mix, FUN=sum)
+idx_misto <- which(df$sten.reg.mix == "misto")
+idx_rigurgito <- which(df$sten.reg.mix == "rigurgito")
+
+df_misto     <- df[idx_misto,]
+df_rigurgito <- df[idx_rigurgito,]
+df_stenosi   <- df[-c(idx_misto, idx_rigurgito), ]
+
+df_misto$tot_cumsum <- cumsum(df_misto_si$tot)
+df_rigurgito$tot_cumsum <- cumsum(df_rigurgito$tot)
+df_stenosi$tot_cumsum <- cumsum(df_stenosi$tot)
+
+dd <- rbind(df_misto, df_rigurgito, df_stenosi)
+
+dd <- dd %>% group_by(sten.reg.mix) %>% mutate(diff = tot_bypass - lag(tot_cumsum))
+
+dd <- dd %>% mutate(left_alive = coalesce(diff, tot_bypass)) %>% 
+  select(tempofu, sten.reg.mix, mort, tot, left_alive)
+
+dd$mort_su_vivi <- dd$mort / dd$left_alive
+# Rimuovi le righe con zero decessi
+dd <- dd[dd$mort != 0,]
+
+g2 <- ggplot(data = dd, aes(x = tempofu, y = mort_su_vivi, col = sten.reg.mix, size = mort)) + 
+  geom_point() + 
+  geom_smooth(se = F) +
+  xlab("Tempo di follow up (anni)") +
+  ylab("Frazione di decessi sul totale") +
+  ggtitle(label = "",
+    subtitle = "Distinti per emodinamica della valvola aortica") +
+  labs(col = "Emodinamica\nvalv. aort.", size = "Decessi") +
+  scale_color_manual(values = c("Blue", "Yellow", "green")) +
+  guides(size = guide_legend(override.aes = list(linetype = 0)),
+         color = guide_legend(override.aes = list(linetype = 0))) +
+  theme(axis.title = element_text(size = 15),
+        axis.text = element_text(size = 12),
+        legend.title = element_text(size = 14),
+        legend.text = element_text(size = 14),
+        title = element_text(size = 18.5)) 
+
+grid.arrange(g1, g2, ncol = 1)
