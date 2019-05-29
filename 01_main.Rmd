@@ -278,7 +278,7 @@ fitfunc<-survfit(coxmod,newdata=datavalvWide)
 datavalvWide$riskdeath6yr<-1-as.numeric(summary(fitfunc, times = 6)$surv)
 
 
-datavalvWide$event6yr<-ifelse(datavalvWide$fuyrs<=6 & datavalvWide$status==1,1,0)  ### CONTROLLARE SE È OK FARE COSÌ O NO
+datavalvWide$event6yr<-ifelse(datavalvWide$fuyrs<=6 & datavalvWide$status==1,1,0) 
 
 # calculate the cumulative probability functions
 estcoxmod  <- survfit(Surv(riskdeath6yr, event6yr) ~ 1, data=datavalvWide)
@@ -433,7 +433,7 @@ stargazer(lmemod, single.row = TRUE, header = FALSE,
 
 
 ```{r}
-fitJM <- jointModel(lmemod, coxmod, timeVar = "time", method ="piecewise-PH-aGH") ####  va bene questa funzione per l'azard baseline?
+fitJM <- jointModel(lmemod, coxmod, timeVar = "time", method ="piecewise-PH-aGH")
 summary(fitJM)
 ```
 
