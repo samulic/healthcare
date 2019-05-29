@@ -38,7 +38,7 @@ library(dca)
 ## Analisi esplorativa
 Descrizione del dataset `valvola-aortica.txt`
 ```{r}
-datavalv<-read.table('dataset-valvola-aortica.txt', na.strings=".",header=T,row.names=NULL)
+datavalv<-read.table('valvola.aortica.txt', na.strings=".",header=T,row.names=NULL)
 names(datavalv)
 ```
 
