@@ -1,0 +1,480 @@
+---
+title: "Progetto di Health Care"
+author: "Andreose, E; Caldara, G; Fiorini, S; Schiavon, E"
+date: "9 maggio 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Big data in Health Care
+Studio di un marker misurato longitudinalmente nel tempo su pazienti che 
+hanno subito un trapianto di valvola aortica.
+```{r}
+# install.packages(c("ggplot2", "stargazer", "kableExtra", "survival", "rms", "survminer", "riskRegression",
+#                    "pec", "splines", "JM", "lattice", "pROC"))
+library(ggplot2)
+library(stargazer) # latex output
+library(kableExtra)
+library(survival)
+library(rms)
+require(survminer)
+require(riskRegression)
+library(pec)
+library(splines)
+library(JM)
+library(lattice)
+library(pROC)
+```
+
+```{r}
+#install.packages("remotes") #per la funzione stdca:
+#remotes::install_github("ddsjoberg/dca")
+library(dca)
+```
+
+## Analisi esplorativa
+Descrizione del dataset `valvola-aortica.txt`
+```{r}
+datavalv<-read.table('dataset-valvola-aortica.txt', na.strings=".",header=T,row.names=NULL)
+names(datavalv)
+```
+
+```{r}
+head(datavalv)
+```
+
+## Modello di rischio al basale (Cox)
+Stima di un modello di rischio con la regressione di Cox, che includa tutte le covariate al basale (viene escluso il marker `log.lvmi`).
+```{r}
+# Funzione che rimuove, qualora presenti, i record sbagliati 
+# con creatinina estremamente alta
+removeOutliers <- function(data) {
+  outlier.idx <- which(data$creat > 300)
+  if (length(outlier.idx) > 0) {
+    data <- data[-outlier.idx, ]
+  }
+  data
+}
+datavalv <- removeOutliers(datavalv)
+# Inverti l'ordine di EF (fraz. eiezione) ventricolare
+datavalv$lv <- ifelse(datavalv$lv == 1, 3, ifelse(datavalv$lv == 3, 1, 2))
+# Crea un dataset con le variabili trasformate in factor
+datavalv.fac <- within(datavalv, {
+  sex <- factor(sex, labels = c("(male)", "(female)"))
+  con.cabg <- factor(con.cabg, labels = c("(no)", "(si)"))
+  lv <- factor(lv, labels = c("(scarsa)", "(moderata)", "(buona)"), ordered = TRUE)
+  sten.reg.mix <- factor(sten.reg.mix, labels = c("(stenosi)", "(rigurgito)", "(misto)"))
+})
+```
+
+```{r}
+#creazione di un nuovo dataset che non abbia righe duplicate per paziente
+datavalvWide<-datavalv.fac[!duplicated(datavalv$num),]
+head(datavalvWide)
+#stargazer(head(datavalvWide[,-c(2,3)]), summary = FALSE, rownames = FALSE) #tabella latex
+```
+
+```{r}
+#KAPLAN-MEYER per analizzare andamento di censurati e a rischio
+fitKM<-survfit(Surv(fuyrs, status) ~ 1,data=datavalvWide)
+summary(fitKM)
+```
+
+```{r}
+#andamento dei soggetti a rischio e censurati nel tempo
+
+#png('Immagini/risk-censored.png')
+plot(fitKM$time, fitKM$n.risk , xlab='time', ylab='number at risk, number of censored',   type='s')
+#points(fitKM$time, fitKM$n.risk)
+
+# reverse estimation to obtain censored subjects
+fitKM_rev<-survfit(Surv(fuyrs, 1-status) ~ 1, data=datavalvWide)
+
+lines(fitKM_rev$time, fitKM_rev$n.event, type='s', col='red')
+#points(fitKM_rev$time, fitKM_rev$n.event)
+
+legend("topright",c("subject at risk","censored subjects"), col=c(1,2), lwd=2,bty="n")
+
+#dev.off()
+```
+
+```{r}
+#numero totale di censurati
+sum(datavalvWide$status)
+```
+
+
+## Modello di rischio al basale (Cox)
+Stima di un modello di rischio con la regressione di Cox, che includa tutte le covariate al basale (viene escluso il marker `log.lvmi`).
+
+```{r}
+coxmod <- coxph(Surv(fuyrs, status) ~ sex + age + con.cabg + creat + lv + sten.reg.mix, data = datavalvWide, x=T)
+summary(coxmod)
+```
+
+```{r}
+#tabella latex
+stargazer(coxmod, single.row = TRUE, header = FALSE,
+          dep.var.caption  = "Coefficient estimates",
+          dep.var.labels.include = FALSE,
+          title = "Parametri per il modello di Cox con covariate al basale")
+```
+
+```{r}
+library(survminer)
+
+#png('Immagini/forest-plot.png')
+ggforest(coxmod)
+#dev.off()
+```
+
+
+```{r}
+#plot delle curva di baseline (eventualmente scegliere un profilo di covariate interessante con cui confrontarla)
+bas<-basehaz(coxmod,centered=FALSE)
+bas.surv<- exp( -bas[,1] )
+plot(bas$time, bas.surv, type='s',col=1,lty=2, xlab='time', ylab='survival probability')
+```
+
+```{r}
+#verifica dell'ipotesi di ph con RESIDUI DI SHOENFELD (sistemare dimensioni della figura finale)
+
+#png('Immagini/residui-schoenfeld.png')
+
+par(mfrow=c(3,2),mar=c(4,4,2,2))
+checkPH_sex<-cox.zph(coxmod)[1]
+plot(checkPH_sex,main="Check PH assumption of sex")
+points(checkPH_sex$x,checkPH_sex$y,pch=16,col="lightgray")
+abline(h=0,lty=2,col=2)
+
+checkPH_age<-cox.zph(coxmod)[2]
+plot(checkPH_age,main="Check PH assumption of age")
+points(checkPH_age$x,checkPH_age$y,pch=16,col="lightgray")
+abline(h=0,lty=2,col=2)
+
+checkPH_con<-cox.zph(coxmod)[3]
+plot(checkPH_con,main="Check PH assumption of con.cabg")
+points(checkPH_con$x,checkPH_con$y,pch=16,col="lightgray")
+abline(h=0,lty=2,col=2)
+
+checkPH_creat<-cox.zph(coxmod)[4]
+plot(checkPH_creat,main="Check PH assumption of creat")
+points(checkPH_creat$x,checkPH_creat$y,pch=16,col="lightgray")
+abline(h=0,lty=2,col=2)
+
+checkPH_lv<-cox.zph(coxmod)[5]
+plot(checkPH_lv,main="Check PH assumption of lv")
+points(checkPH_lv$x,checkPH_lv$y,pch=16,col="lightgray")
+abline(h=0,lty=2,col=2)
+
+checkPH_sten<-cox.zph(coxmod)[6]
+plot(checkPH_sten,main="Check PH assumption of sten.reg.mix")
+points(checkPH_sten$x,checkPH_sten$y,pch=16,col="lightgray")
+abline(h=0,lty=2,col=2)
+
+#dev.off()
+```
+
+```{r}
+#verifica dell'ipotesi di ph con metodo graficon (OK SOLO PER VARIABILI CATEGORICHE )
+
+par(mfrow=c(3,2),mar=c(4,4,2,2))
+
+km_sex<-survfit(Surv(fuyrs, status) ~ sex,data=datavalvWide)
+plot(km_sex, col=c("black", "red"), fun="cloglog",ylab="log(-log(Survival))",xlab="log(time)",main="Check PH assumption of sex")
+
+### groped KM ma funziona solo a tempo fissat, non va bene per distinguere le curve di sopravvivenza per diversi valori del gruppo di covariate
+#km_age<-groupkm(datavalvWide$age, Surv(datavalvWide$fuyrs, datavalvWide$status), g=10, u=5, pl=TRUE)
+#plot(km_age, col=c("black", "red"), fun="cloglog",ylab="log(-log(Survival))",xlab="log(time)",main="Check PH assumption of age")
+
+km_con<-survfit(Surv(fuyrs, status) ~ con.cabg,data=datavalvWide)
+plot(km_con, col=c("black", "red"), fun="cloglog",ylab="log(-log(Survival))",xlab="log(time)",main="Check PH assumption of con.cabg")
+
+km_creat<-survfit(Surv(fuyrs, status) ~ creat,data=datavalvWide)
+plot(km_creat, col=c("black", "red"), fun="cloglog",ylab="log(-log(Survival))",xlab="log(time)",main="Check PH assumption of creat")
+
+km_lv<-survfit(Surv(fuyrs, status) ~ factor(lv),data=datavalvWide)
+plot(km_lv, col=c("black", "red"), fun="cloglog",ylab="log(-log(Survival))",xlab="log(time)",main="Check PH assumption of lv")
+
+km_sten<-survfit(Surv(fuyrs, status) ~ sten.reg.mix,data=datavalvWide)
+plot(km_sten, col=c("black", "red"), fun="cloglog",ylab="log(-log(Survival))",xlab="log(time)",main="Check PH assumption of sten.reg.mix")
+```
+
+```{r}
+#verifica della linearità delle variabili continue
+library(splines)
+
+#png('Immagini/liearita-continue.png')
+
+### AGE variable
+
+par(mfrow=c(2,2),mar=c(4,4,2,2))
+#par(mfrow=c(1,2),mar=c(4,4,2,2))
+mar.res<-resid(coxmod,type='martingale')
+plot(datavalvWide$age, mar.res,
+     xlab="Time", ylab="Martingale Residuals",
+     main="Check functional form of age")
+lines(lowess(datavalvWide$age, mar.res),col='red')
+
+
+ms <- coxph(Surv(fuyrs, status>0) ~ ns(age, df=3), data = datavalvWide)
+pred <- predict(ms, type="terms", se=TRUE)
+hfit <- pred$fit[,1]
+hse <- pred$se[,1]
+hmat <- cbind(hfit, hfit+1.96*hse,hfit-1.96*hse)
+o <- order(datavalvWide$age)
+matplot(datavalvWide$age[o], hmat[o, ], pch="*",col=c("red","orangered","orangered"), lwd=c(2,1,1),xlab = "age", ylab="log hazard ratio",main="Check functional form of age",type="l")
+
+ms <- coxph(Surv(fuyrs, status>0) ~ age, data = datavalvWide)
+pred <- predict(ms, type="terms", se=TRUE)
+hfit <- pred$fit[,1]
+hse <- pred$se[,1]
+hmat <- cbind(hfit, hfit+1.96*hse,hfit-1.96*hse)
+o <- order(datavalvWide$age)
+matplot(datavalvWide$age[o], hmat[o, ], pch="*",col=c("blue","cornflowerblue","cornflowerblue"), lwd=c(2,1,1),type="l",add=T)
+
+legend("topright",c("natural spline","linear"),col=c(2,4),lwd=2,bty="n")
+
+
+
+### CREAT variable
+
+#par(mfrow=c(1,2),mar=c(4,4,2,2))
+mar.res<-resid(coxmod,type='martingale')
+plot(datavalvWide$creat, mar.res,
+     xlab="Time", ylab="Martingale Residuals",
+     main="Check functional form of creat")
+lines(lowess(datavalvWide$creat, mar.res),col='red')
+
+ms <- coxph(Surv(fuyrs, status>0) ~ ns(creat,df=3), data = datavalvWide)
+pred <- predict(ms, type="terms", se=TRUE)
+hfit <- pred$fit[,1]
+hse <- pred$se[,1]
+hmat <- cbind(hfit, hfit+1.96*hse,hfit-1.96*hse)
+o <- order(datavalvWide$creat)
+matplot(datavalvWide$creat[o], hmat[o, ], pch="*",col=c("red","orangered","orangered"), lwd=c(2,1,1),xlab = "creat", ylab="log hazard ratio",main="Check functional form of creat",type="l")
+
+ms <- coxph(Surv(fuyrs, status>0) ~ creat, data = datavalvWide)
+pred <- predict(ms, type="terms", se=TRUE)
+hfit <- pred$fit[,1]
+hse <- pred$se[,1]
+hmat <- cbind(hfit, hfit+1.96*hse,hfit-1.96*hse)
+o <- order(datavalvWide$creat)
+matplot(datavalvWide$creat[o], hmat[o, ], pch="*",col=c("blue","cornflowerblue","cornflowerblue"), lwd=c(2,1,1),type="l",add=T)
+
+legend("topright",c("natural spline","linear"),col=c(2,4),lwd=2,bty="n")
+
+dev.off()
+```
+
+### Valutazione
+```{r}
+###### CALIBRAZIONE #######
+
+fitfunc<-survfit(coxmod,newdata=datavalvWide)
+datavalvWide$riskdeath6yr<-1-as.numeric(summary(fitfunc, times = 6)$surv)
+
+
+datavalvWide$event6yr<-ifelse(datavalvWide$fuyrs<=6 & datavalvWide$status==1,1,0)  ### CONTROLLARE SE È OK FARE COSÌ O NO
+
+# calculate the cumulative probability functions
+estcoxmod  <- survfit(Surv(riskdeath6yr, event6yr) ~ 1, data=datavalvWide)
+
+
+#png('Immagini/calibrazione-cox.png')
+
+par(mai = c(0.9, 0.9, 0.05, 0.05))
+
+# Predictiveness curve of model1:
+plot((1 - estcoxmod$surv) * 100, estcoxmod$time, main = '', type = 'l', col='blue',
+     ylim = c(0,1), lwd = 3, ylab = 'r', cex.lab = 1.7, cex.axis = 1.7,
+     xlab = expression(paste('P(riskscore',''<='r)*100')), xaxt = "n", yaxt = "n", frame = F) 
+axis(2, at = c(0,0.2,0.4,0.6,0.8,1), labels = NA, pos = 0)
+axis(2, at = c(0,0.2,0.4,0.6,0.8,1), labels = c(0,0.2,0.4,0.6,0.8,1), cex.axis = 1.7, pos = 0)
+axis(1, at = c(0,20,40,60,80,100), labels = c(0,20,40,60,80,100), cex.axis = 1.7, pos = 0)
+
+
+# Predictiveness curve of a useless model:
+p<-sum(datavalvWide$event6yr)/dim(datavalvWide)[1]
+lines(c(0, 100), c(p, p), lty = 2, lwd = 3, col = 'gray') 
+text(40, 0.1, labels = bquote(rho ==  .(round(p,3)*100) ~ '%'), cex = 1.7) 
+
+# Predictiveness curve of the ideal risk predictor:
+lines(c(0, (1 - p) * 100), c(0, 0), lwd = 4)
+lines(c((1 - p) * 100, (1 - p) * 100), c(0, 1), lwd = 4)
+lines(c((1 - p) * 100, 100), c(1, 1), lwd = 4)
+
+legend(x = 0, y = 1, c("Cox model"), col='blue', lwd = c(3, 3), lty = c(1, 3), bty = 'n', cex = 1.8)
+
+dev.off()
+```
+
+```{r}
+#Brier score con cross validation
+require(riskRegression)
+library(pec)
+set.seed(1103)
+
+PredError <- pec(coxmod,
+                 formula=Surv(fuyrs, status)~1,
+                 data=datavalvWide,
+                 maxtime=6,
+                 cens.model="marginal",
+                 splitMethod="bootcv",
+                 B=10,
+                 verbose=TRUE)
+```
+
+```{r}
+#png('Immagini/predError-BrierCV.png')
+plot(PredError)
+#dev.off()
+```
+
+```{r}
+######## DISCRIMINAZIONE ############
+library(pROC)
+
+#png('Immagini/ROC')
+
+rocc<-roc(datavalvWide$event6yr, datavalvWide$riskdeath6yr)
+plot(1 - rocc$specificities, rocc$sensitivities, 
+     type = 'l', ylab = 'TPF', xlab = 'FPF', lwd = 3, xaxt = "n", yaxt = "n", 
+     xlim = c(0,1), cex.lab = 1.7, frame = F)
+axis(1, at = c(0,0.25,0.5,0.75,1), labels = NA, pos = 0)
+axis(1, at = c(0,0.25,0.5,0.75,1), labels = c(0,0.25,0.5,0.75,1), cex.axis = 1.7, pos = 0)
+axis(2, at = c(0,0.25,0.5,0.75,1), labels = c(0,0.25,0.5,0.75,1), cex.axis = 1.7, pos = 0)
+
+Youden<-rocc$sensitivities+rocc$specificities-1
+optimal.cut.off<-rocc$thresholds[Youden==max(Youden)]
+cbind(optimal.cut.off,Youden=max(Youden))
+
+points(1-rocc$specificities[rocc$thresholds==optimal.cut.off],rocc$sensitivities[rocc$thresholds==optimal.cut.off],pch=0,cex=1.7)
+
+
+#chance line
+abline(a=0, b=1, lty = 2, lwd = 2)
+lines(c(0,1), c(1,1), lty = 1)
+lines(c(1,1), c(0,1), lty = 1)
+
+legend(x = 0, y = 1, c("Cox model"), lwd = c(3,3), lty = c(1,3), bty = 'n', cex = 1.7)
+
+#dev.off()
+
+```
+
+```{r}
+(AUC <- rocc$auc)
+```
+
+```{r}
+# NET BENEFIT
+#per la funzione stdca:
+#install.packages("remotes")
+#remotes::install_github("ddsjoberg/dca")
+
+#png('Immagini/NBthresh.png')
+library(dca)
+netbenefit <- stdca(data = datavalvWide, outcome = "status", ttoutcome = "fuyrs", timepoint = 6, 
+                    predictors = c("riskdeath6yr"))
+
+#dev.off()
+
+#png('Immagini/NBrisk.png')
+par(mar = c(5, 4.5, 4, 1)) 
+# Net Benefit for model1:
+plot(netbenefit$net.benefit$threshold, netbenefit$net.benefit$riskdeath6yr, type = "l", lwd = 3, 
+     xlim = c(0, 1), ylim = c(0, 0.20), xlab = "r", ylab = "NB(r)", xaxt = "n", yaxt = "n", 
+     cex.lab = 1.7, cex.axis = 1.6, frame = F)
+axis(1, at = c(0,0.2,0.4,0.6,0.8,1), labels = NA, pos = 0)
+axis(1, at = c(0,0.2,0.4,0.6,0.8,1), labels = c(0,0.2,0.4,0.6,0.8,1), cex.axis = 1.7, pos = 0)
+axis(2, at = c(0,0.05,0.1,0.15,0.2), labels = c(0,0.05,0.1,0.15,0.2), cex.axis = 1.7, pos = 0)
+
+# We add an extra axis on the top of the graph with the costs:
+axis(3, at = c(0,0.2,0.4,0.6,0.8,1), labels = c(0,0.25,0.67,1.5,4,'Inf'), cex.axis = 1.6)
+mtext("C", side = 3, line = 2.5, cex = 1.7, las = 1)
+
+#dev.off()
+
+#legend('topright', c("riskdeath"), lwd = c(3, 3), lty = c(1, 3), col = c(1, 1), bty = 'n', cex = 1.7
+```
+
+## Modello longitudinale
+```{r}
+library(JM)
+library(lattice)
+
+#plot dell'andamento longitudinae del marker per 20 pazienti selezionati casualmente
+#png('Immagini/descr-loglvmi.png')
+set.seed(1203)
+xyplot(log.lvmi~time | num, data=datavalv[datavalv$num %in% sample(datavalv$num,20),], 
+       panel = function(x, y){
+         panel.xyplot(x, y)
+         panel.lmline(x, y)
+       }, as.table=T)
+#dev.off()
+```
+
+```{r}
+lmemod <- lme(log.lvmi ~ time+sex+age+con.cabg+creat+lv+sten.reg.mix, random = ~ time | num, data = datavalv)
+summary(lmemod)
+```
+
+```{r}
+#library(stargazer)
+stargazer(lmemod, single.row = TRUE, header = FALSE,
+          dep.var.caption  = "Coefficient estimates",
+          dep.var.labels.include = FALSE,
+          title = "Parametri per il modello linearea effetti misti.")
+```
+
+
+```{r}
+fitJM <- jointModel(lmemod, coxmod, timeVar = "time", method ="piecewise-PH-aGH") ####  va bene questa funzione per l'azard baseline?
+summary(fitJM)
+```
+
+```{r}
+#tabella latex risultati
+library(xtable)
+options(xtable.floating = FALSE)
+options(xtable.timestamp = "")
+
+xtable(fitJM)
+```
+
+```{r}
+#tabella per il modello tempo all'evento con i coefficienti esponenziati
+HR<-exp(summary(fitJM)$`CoefTable-Event`[,1])
+lower <- exp(summary(fitJM)$`CoefTable-Event`[,1] - qnorm(.025)*summary(fitJM)$`CoefTable-Event`[,2])
+upper <- exp(summary(fitJM)$`CoefTable-Event`[,1] + qnorm(.025)*summary(fitJM)$`CoefTable-Event`[,2])
+p.value<-summary(fitJM)$`CoefTable-Event`[,4]
+round(cbind(HR, lower, upper,p.value),3)
+#xtable(round(cbind(HR, lower, upper,p.value),3)) #tabella latex
+```
+
+```{r}
+## predizione del rischio:
+# eseguire questo chunk quante volte si vuole per predire il rischio per diversi pazienti, verrà selezionato ogni volta un paziente diverso. Aver cura di cambiare il nome per il salvataggio immagine.
+set.seed(1203)
+patient <- datavalv[datavalv$num %in% sample(datavalv$num,1), ]
+
+for (i in 1:nrow(patient)) {
+  data_iter <- patient[1:i, ]
+  sfit_i <- survfitJM(fitJM, newdata = data_iter, idVar = "num")
+  plot(sfit_i, estimator = "median", include.y = TRUE,
+       conf.int = TRUE, fill.area = TRUE, col.area = "lightgrey", 
+       ylab2 = "log.lvmi",fun=function(x) (1-x))
+  
+  if (i == nrow(patient)){ #serve solo per salvare l'ultima immagine
+    png('Immagini/riskcurve-patient3.png') #cambiare NOME
+    plot(sfit_i, estimator = "median", include.y = TRUE,
+       conf.int = TRUE, fill.area = TRUE, col.area = "lightgrey", 
+       ylab2 = "log.lvmi",fun=function(x) (1-x))
+    dev.off()
+  }
+}
+```
